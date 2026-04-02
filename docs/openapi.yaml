@@ -20,7 +20,7 @@ info:
 
 servers:
   - url: https://finance-data-processing-and-access-2amx.onrender.com/api/v1
-    description: Production (update this after deploying to Render)
+    description: Production 
   - url: http://localhost:3000/api/v1
     description: Local development
 
