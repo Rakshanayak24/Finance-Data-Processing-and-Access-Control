@@ -19,10 +19,10 @@ info:
     | Viewer | viewer@example.com | Viewer@1234 |
 
 servers:
-  - url: http://localhost:3000/api/v1
-    description: Local development
   - url: https://finance-data-processing-and-access-2amx.onrender.com/api/v1
     description: Production (update this after deploying to Render)
+  - url: http://localhost:3000/api/v1
+    description: Local development
 
 security:
   - BearerAuth: []
