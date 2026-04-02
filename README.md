@@ -32,7 +32,6 @@ A production-grade REST API for a multi-role finance dashboard system, built wit
 - npm ≥ 9
 
 ### Installation & Run
-
 ```bash
 # 1. Enter directory
 cd finance-dashboard
@@ -40,17 +39,13 @@ cd finance-dashboard
 # 2. Install dependencies
 npm install
 
-# 3. Configure environment
-cp .env.example .env
-# Defaults work out of the box — no changes needed for local dev
-
-# 4. Seed the database with test data
+# 3. Seed the database with test data
 npm run seed
 
-# 5. Start dev server (auto-restarts on file changes)
+# 4. Start dev server (auto-restarts on file changes)
 npm run dev
 
-# 6. Run tests
+# 5. Run tests
 npm test
 ```
 
