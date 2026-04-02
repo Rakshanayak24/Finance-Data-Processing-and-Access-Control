@@ -2,7 +2,9 @@
 
 A production-grade REST API for a multi-role finance dashboard system, built with **Node.js**, **Express**, and **SQLite** (via `better-sqlite3`).
 
-> **API Docs (local):** `http://localhost:3000/api/v1/docs` — fully interactive Swagger UI after running the server.
+> **Live API:** https://finance-data-processing-and-access-2amx.onrender.com
+> **Live Swagger Docs:** https://finance-data-processing-and-access-2amx.onrender.com/api/v1/docs
+> **Local Swagger Docs:** `http://localhost:3000/api/v1/docs` — fully interactive Swagger UI after running the server.
 
 ---
 
@@ -78,32 +80,18 @@ Server starts at **http://localhost:3000**
 4. Click the **Authorize 🔒** button (top right) → paste `Bearer <your_token>` → **Authorize**
 5. All 🔒 endpoints are now unlocked — click **Try it out** → **Execute** on any route
 
+> **Note:** The live Render deployment may take ~30 seconds to respond on the first request after inactivity (free tier cold start). Subsequent requests are fast.
+
 ### Quick Test (PowerShell)
 
 ```powershell
-# Login and save token
 $r = Invoke-RestMethod -Uri "http://localhost:3000/api/v1/auth/login" `
   -Method POST -ContentType "application/json" `
   -Body '{"email":"admin@example.com","password":"Admin@1234"}'
 $TOKEN = $r.data.accessToken
 
-# Hit the dashboard
 Invoke-RestMethod -Uri "http://localhost:3000/api/v1/dashboard/overview" `
   -Headers @{Authorization="Bearer $TOKEN"} | ConvertTo-Json -Depth 5
-```
-
-### Quick Test (curl / bash)
-
-```bash
-# Login
-TOKEN=$(curl -s -X POST http://localhost:3000/api/v1/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"Admin@1234"}' \
-  | jq -r .data.accessToken)
-
-# Hit the dashboard
-curl -H "Authorization: Bearer $TOKEN" \
-  http://localhost:3000/api/v1/dashboard/overview | jq .
 ```
 
 ---
@@ -130,15 +118,13 @@ Request → Express Middleware Stack
          Audit Logger (non-blocking, failure-isolated)
 ```
 
-The application follows a clean **layered architecture**:
-
 - **Routes** — declare HTTP method + path + middleware chain only
 - **Middleware** — auth, authorization, validation, rate limiting
 - **Controllers** — parse request, call service, send response (thin by design)
 - **Services** — all business logic, DB queries, access rules
 - **Config** — database init, constants, permission matrix, environment
 
-Controllers have zero business logic — they are glue between HTTP and the service layer. All decisions (who can do what, what data to return) live in services.
+Controllers have zero business logic. All decisions live in services.
 
 ---
 
@@ -180,43 +166,23 @@ finance-dashboard/
 │   │   ├── dashboardService.js # All aggregation + analytics queries
 │   │   └── auditService.js     # Audit log writes + reads
 │   ├── controllers/            # Thin — request parsing + response sending only
-│   │   ├── authController.js
-│   │   ├── userController.js
-│   │   ├── recordController.js
-│   │   ├── dashboardController.js
-│   │   └── auditController.js
 │   ├── routes/
-│   │   ├── authRoutes.js
-│   │   ├── userRoutes.js
-│   │   ├── recordRoutes.js
-│   │   ├── dashboardRoutes.js
-│   │   ├── auditRoutes.js
 │   │   └── docsRoutes.js       # Swagger UI served at /api/v1/docs
 │   └── utils/
 │       ├── response.js         # sendSuccess(), sendError(), pagination helpers
 │       └── logger.js           # Structured JSON logger
-├── tests/
-│   ├── helpers.js              # In-memory DB setup, user/record factories
-│   ├── auth.test.js            # 14 tests: register, login, refresh, me
-│   ├── users.test.js           # 13 tests: CRUD, role access, self vs admin
-│   ├── records.test.js         # 18 tests: CRUD, filters, soft delete, restore
-│   └── dashboard.test.js       # 11 tests: analytics, role gating
+├── tests/                      # 56 tests across 4 files
 ├── scripts/
-│   └── seed.js                 # Realistic 200-record seed dataset (3 users)
+│   └── seed.js                 # Realistic 200-record seed dataset
 ├── docs/
-│   └── openapi.yaml            # Full OpenAPI 3.0 spec (also served at /api/v1/docs)
-├── data/                       # SQLite DB files (auto-created on first run)
-├── .env.example                # Environment variable template — copy to .env
+│   └── openapi.yaml            # Full OpenAPI 3.0 spec
+├── .env.example
 └── package.json
 ```
-
-> **Note on `data/` directory:** The `data/finance.db` file is git-ignored in production. It is auto-created when you run `npm run seed`. The directory is included in the repo so the folder exists, but the database file itself should never be committed.
 
 ---
 
 ## Role & Permission Model
-
-Three roles with a clear, centrally-enforced permission matrix defined in `src/config/constants.js`:
 
 | Permission             | Viewer | Analyst | Admin |
 |------------------------|:------:|:-------:|:-----:|
@@ -232,11 +198,7 @@ Three roles with a clear, centrally-enforced permission matrix defined in `src/c
 | View audit logs        | ❌     | ❌      | ✅    |
 | Edit own profile       | ✅     | ✅      | ✅    |
 
-Permissions are enforced via the `authorize(permission)` middleware which checks the `PERMISSIONS` map in `constants.js`. Adding a new role or changing a permission is a **single-line change** in one file — no `if (role === 'admin')` scattered across controllers.
-
-**Data scoping:** Admins see data for all users in dashboard queries. Analysts and Viewers see only their own records. This is enforced in `dashboardService.resolveUserScope()`.
-
-**Registration security:** Public registration always assigns `role = 'viewer'`, regardless of what is sent in the body. Only an authenticated admin can create accounts with elevated roles. This prevents privilege escalation via the API.
+**Registration security:** Public registration always assigns `role = 'viewer'` regardless of what is sent. Only an authenticated admin can create elevated roles — prevents privilege escalation.
 
 ---
 
@@ -249,52 +211,21 @@ All responses use a consistent envelope:
   "success": true,
   "message": "Human-readable message",
   "data": { ... },
-  "meta": { "pagination": { "page": 1, "limit": 20, "total": 150, "totalPages": 8, "hasNextPage": true } }
-}
-```
-
-Error responses:
-```json
-{
-  "success": false,
-  "message": "What went wrong",
-  "errors": [ { "field": "email", "message": "Must be valid", "value": "bad-input" } ]
+  "meta": { "pagination": { "page": 1, "limit": 20, "total": 150 } }
 }
 ```
 
 ### Authentication
-
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| POST | `/api/v1/auth/register` | Public | Create account (role always defaults to viewer) |
+| POST | `/api/v1/auth/register` | Public | Create account (role always viewer) |
 | POST | `/api/v1/auth/login` | Public | Returns accessToken + refreshToken |
-| POST | `/api/v1/auth/refresh` | Public | Rotate refresh token, get new pair |
+| POST | `/api/v1/auth/refresh` | Public | Rotate refresh token |
 | GET  | `/api/v1/auth/me` | 🔒 Any | Current user profile |
-| POST | `/api/v1/auth/logout` | 🔒 Any | Revoke current refresh token |
+| POST | `/api/v1/auth/logout` | 🔒 Any | Revoke current session |
 | POST | `/api/v1/auth/logout-all` | 🔒 Any | Revoke all sessions |
 
-**Login response:**
-```json
-{
-  "data": {
-    "accessToken": "eyJ...",
-    "refreshToken": "eyJ...",
-    "user": { "id": "...", "name": "Alice Admin", "role": "admin" }
-  }
-}
-```
-
-### Users
-
-| Method | Endpoint | Auth | Description |
-|--------|----------|------|-------------|
-| GET    | `/api/v1/users` | 🔒 Admin | List users — query: `page, limit, role, status, search` |
-| GET    | `/api/v1/users/:id` | 🔒 Self/Admin | Get user by ID |
-| PATCH  | `/api/v1/users/:id` | 🔒 Self/Admin | Update name/password (role/status: Admin only) |
-| DELETE | `/api/v1/users/:id` | 🔒 Admin | Soft-delete user (cannot delete self) |
-
 ### Financial Records
-
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET    | `/api/v1/records` | 🔒 All | Paginated + filtered list |
@@ -302,94 +233,55 @@ Error responses:
 | POST   | `/api/v1/records` | 🔒 Analyst/Admin | Create record |
 | PATCH  | `/api/v1/records/:id` | 🔒 Analyst/Admin | Update record |
 | DELETE | `/api/v1/records/:id` | 🔒 Admin | Soft delete |
-| POST   | `/api/v1/records/:id/restore` | 🔒 Admin | Restore soft-deleted record |
+| POST   | `/api/v1/records/:id/restore` | 🔒 Admin | Restore deleted record |
 
-**Record filters (query params):** `type`, `category`, `startDate`, `endDate`, `minAmount`, `maxAmount`, `search`, `tags`, `sortBy`, `order`, `page`, `limit`
-
-**Create body:**
-```json
-{
-  "amount": 4500.00,
-  "type": "expense",
-  "category": "food",
-  "date": "2024-06-15",
-  "description": "Team lunch",
-  "tags": ["work", "food"]
-}
-```
+**Filters:** `type`, `category`, `startDate`, `endDate`, `minAmount`, `maxAmount`, `search`, `tags`, `sortBy`, `order`, `page`, `limit`
 
 ### Dashboard & Analytics
-
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
 | GET | `/api/v1/dashboard/overview` | 🔒 All | Full dashboard in one call |
 | GET | `/api/v1/dashboard/summary` | 🔒 All | Totals + net balance |
 | GET | `/api/v1/dashboard/recent-activity` | 🔒 All | Latest N transactions |
-| GET | `/api/v1/dashboard/categories` | 🔒 Analyst/Admin | Category breakdown with income/expense split |
-| GET | `/api/v1/dashboard/trends/monthly` | 🔒 Analyst/Admin | Monthly income vs expense trends |
-| GET | `/api/v1/dashboard/trends/weekly` | 🔒 Analyst/Admin | Weekly income vs expense trends |
+| GET | `/api/v1/dashboard/categories` | 🔒 Analyst/Admin | Category breakdown |
+| GET | `/api/v1/dashboard/trends/monthly` | 🔒 Analyst/Admin | Monthly trends |
+| GET | `/api/v1/dashboard/trends/weekly` | 🔒 Analyst/Admin | Weekly trends |
 | GET | `/api/v1/dashboard/top-categories` | 🔒 Analyst/Admin | Top spending categories |
 
-**Overview response shape:**
-```json
-{
-  "summary": { "totalIncome": 50000, "totalExpenses": 7000, "netBalance": 43000, "totalRecords": 42 },
-  "categoryBreakdown": [ { "category": "food", "expense": { "total": 5000, "count": 12 } } ],
-  "monthlyTrends": [ { "month": "2024-06", "income": 50000, "expense": 7000, "netBalance": 43000 } ],
-  "topCategories": [ { "category": "food", "total": 5000, "count": 12 } ],
-  "recentActivity": [ { "amount": 1200, "type": "expense", "category": "transport", "date": "2024-06-14" } ],
-  "dailyAverages": { "avgDailyIncome": 1666.67, "avgDailyExpense": 233.33 }
-}
-```
-
-### Audit Logs
-
+### Users & Audit
 | Method | Endpoint | Auth | Description |
 |--------|----------|------|-------------|
-| GET | `/api/v1/audit` | 🔒 Admin | Paginated logs with user info — query: `userId, resource, action` |
-
-**Sample log entry:**
-```json
-{
-  "id": "...",
-  "user_name": "Alice Admin",
-  "action": "CREATE_RECORD",
-  "resource": "financial_records",
-  "details": { "amount": 4500, "type": "expense", "category": "food" },
-  "ip_address": "::1",
-  "created_at": "2024-06-15T10:30:00.000Z"
-}
-```
+| GET    | `/api/v1/users` | 🔒 Admin | List all users |
+| GET    | `/api/v1/users/:id` | 🔒 Self/Admin | Get user |
+| PATCH  | `/api/v1/users/:id` | 🔒 Self/Admin | Update user |
+| DELETE | `/api/v1/users/:id` | 🔒 Admin | Soft-delete user |
+| GET    | `/api/v1/audit` | 🔒 Admin | Audit logs |
 
 ---
 
 ## Design Decisions & Tradeoffs
 
-**SQLite over Postgres/MySQL** — Zero setup, synchronous API, WAL mode for concurrent reads. For production with many concurrent writers, the service layer abstracts the DB so migrating to Postgres would be a schema migration, not a rewrite.
+**SQLite over Postgres/MySQL** — Zero setup, synchronous API, WAL mode for concurrent reads. Service layer abstracts the DB so migrating to Postgres is a schema migration, not a rewrite.
 
-**Soft Delete for records and users** — Records and users are soft-deleted (`is_deleted = 1`) rather than hard-deleted. This preserves the financial audit trail, allows restoration, and is standard practice in financial systems. Deleting a user no longer cascades to their financial records.
+**Soft Delete for records and users** — `is_deleted = 1` rather than hard delete. Preserves financial audit trail, allows restoration, standard in financial systems.
 
-**JWT Refresh Token Rotation** — Every refresh rotates the token: the old one is revoked immediately. This limits the damage window if a token is stolen. All tokens are stored in the DB so `logout-all` is possible.
+**JWT Refresh Token Rotation** — Every refresh rotates the token and revokes the old one immediately. All tokens stored in DB so `logout-all` works across devices.
 
-**Permission Matrix over scattered role checks** — A central `PERMISSIONS` map in `constants.js` owns all access decisions. `authorize('records:create')` in the route is the only place a permission is referenced. Adding a new role means one object change — no controller edits needed.
+**Permission Matrix over scattered role checks** — Central `PERMISSIONS` map in `constants.js`. Adding a new role is one object change — no controller edits needed.
 
-**Audit log failure isolation** — Audit writes are wrapped in try/catch. A logging failure logs an error but never fails the request. A logging outage should never break a financial transaction.
+**Audit log failure isolation** — Audit writes wrapped in try/catch. A logging failure never fails the user's request.
 
-**Admin data scope in service layer** — `dashboardService.resolveUserScope()` is the single function that decides whether a user sees all data or just their own. Business rules belong in services, not controllers.
-
-**Composite DB indexes** — Three composite indexes cover the real query patterns: `(user_id, is_deleted, date)` for user + date range filters, `(is_deleted, type)` for dashboard aggregations, and `(is_deleted, category)` for category breakdowns. These eliminate full table scans on the most expensive queries.
-
-**Swagger UI served at runtime** — The OpenAPI spec at `docs/openapi.yaml` is served interactively at `/api/v1/docs`. No separate documentation step needed — start the server and the docs are live.
+**Composite DB indexes** — `(user_id, is_deleted, date)`, `(is_deleted, type)`, `(is_deleted, category)` — eliminate full table scans on the most expensive dashboard queries.
 
 ---
 
 ## Known Limitations
 
-- **Single-process only** — `better-sqlite3` is synchronous and not suited for multi-process deployments. Migrate to Postgres for horizontal scaling.
-- **No email verification** — registration is open; production would require email confirmation before activation.
-- **In-process rate limiting** — `express-rate-limit` state is in-memory and resets on restart. Use Redis for distributed rate limiting in production.
-- **JWT secret in .env** — ensure `JWT_SECRET` is set to a long random value in production and never committed to version control.
-- **Single currency** — no multi-currency support. All amounts are assumed to share the same unit.
+- **Single-process only** — `better-sqlite3` is synchronous. Migrate to Postgres for horizontal scaling.
+- **No email verification** — production would require email confirmation on register.
+- **In-process rate limiting** — resets on restart. Use Redis for distributed rate limiting in production.
+- **Render free tier cold start** — live deployment may take ~30 seconds after 15 min of inactivity.
+- **Single currency** — no multi-currency support.
 
 ---
 
@@ -400,25 +292,23 @@ npm test               # Run all 56 tests
 npm run test:coverage  # With coverage report
 ```
 
-Tests use an **in-memory SQLite database** — each suite gets a fresh isolated DB via `beforeEach`. No network calls, no filesystem side effects, no test order dependencies.
-
-**Test coverage:**
-- `auth.test.js` — register, login, refresh tokens, me endpoint, token edge cases (14 tests)
-- `users.test.js` — list, get, update, delete, role-based access, self vs admin (13 tests)
-- `records.test.js` — CRUD, filtering, soft delete, restore, permission enforcement (18 tests)
-- `dashboard.test.js` — all analytics endpoints, role gating (11 tests)
-
-**Result: 56/56 passing**
+| Test file | Coverage | Tests |
+|---|---|---|
+| `auth.test.js` | Register, login, refresh, token edge cases | 14 |
+| `users.test.js` | CRUD, role access, self vs admin | 13 |
+| `records.test.js` | CRUD, filters, soft delete, restore, permissions | 18 |
+| `dashboard.test.js` | Analytics endpoints, role gating | 11 |
+| **Total** | | **56/56 passing** |
 
 ---
 
 ## Assumptions
 
-1. **Positive amounts only** — `type` (`income`/`expense`) determines direction. A refund is recorded as `income` in the relevant category.
-2. **Single currency** — no multi-currency support. All amounts share the same unit.
-3. **Transaction date vs record date** — `date` is when the transaction happened; `created_at` is when it was recorded in the system.
-4. **Admin sees all data** in dashboard queries; non-admins see only their own records.
-5. **Free-text categories** — not restricted to a fixed enum. Predefined suggestions exist in `constants.js` but any string ≤ 50 chars is accepted.
-6. **Email is immutable** — email changes are not supported via API (would require re-verification in production).
-7. **Soft deletes only via API** — only admins can restore deleted records or users. No hard-delete HTTP endpoint is exposed.
-8. **Audit logs are append-only** — there is no API to delete audit logs. This is intentional for compliance.
+1. **Positive amounts only** — `type` determines direction. A refund = `income` in the relevant category.
+2. **Single currency** — all amounts share the same unit.
+3. **Transaction date vs record date** — `date` = when it happened; `created_at` = when recorded.
+4. **Admin sees all data** in dashboard; non-admins see only their own records.
+5. **Free-text categories** — any string ≤ 50 chars accepted.
+6. **Email is immutable** — not changeable via API.
+7. **Soft deletes only** — no hard-delete endpoint exposed.
+8. **Audit logs are append-only** — no delete API. Intentional for compliance.
