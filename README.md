@@ -3,7 +3,9 @@
 A production-grade REST API for a multi-role finance dashboard system, built with **Node.js**, **Express**, and **SQLite** (via `better-sqlite3`).
 
 > **Live API:** https://finance-data-processing-and-access-2amx.onrender.com
+
 > **Live Swagger Docs:** https://finance-data-processing-and-access-2amx.onrender.com/api/v1/docs
+
 > **Local Swagger Docs:** `http://localhost:3000/api/v1/docs` — fully interactive Swagger UI after running the server.
 
 ---
