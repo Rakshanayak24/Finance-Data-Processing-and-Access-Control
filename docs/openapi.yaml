@@ -1,0 +1,466 @@
+openapi: 3.0.0
+info:
+  title: Finance Dashboard API
+  version: 1.0.0
+  description: |
+    Finance Data Processing and Access Control Backend.
+
+    ## How to use this page
+    1. Expand **POST /auth/login** → click **Try it out** → enter credentials below → **Execute**
+    2. Copy the `accessToken` from the response
+    3. Click the **Authorize** button (🔒 top right) → paste `Bearer <your_token>` → **Authorize**
+    4. All other endpoints are now authenticated — just click Try it out → Execute
+
+    ## Test credentials (after running npm run seed)
+    | Role | Email | Password |
+    |------|-------|----------|
+    | Admin | admin@example.com | Admin@1234 |
+    | Analyst | analyst@example.com | Analyst@1234 |
+    | Viewer | viewer@example.com | Viewer@1234 |
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development
+  - url: https://your-app.onrender.com/api/v1
+    description: Production (update this after deploying to Render)
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Paste your accessToken from POST /auth/login here"
+
+  schemas:
+    SuccessResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string, example: "Operation successful." }
+        data: { type: object }
+
+    ErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string, example: "What went wrong." }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+              value: { type: string }
+
+    PaginationMeta:
+      type: object
+      properties:
+        pagination:
+          type: object
+          properties:
+            page: { type: integer, example: 1 }
+            limit: { type: integer, example: 20 }
+            total: { type: integer, example: 150 }
+            totalPages: { type: integer, example: 8 }
+            hasNextPage: { type: boolean }
+            hasPrevPage: { type: boolean }
+
+tags:
+  - name: Auth
+    description: Registration, login, token management
+  - name: Users
+    description: User management (Admin only for most actions)
+  - name: Records
+    description: Financial records CRUD and filtering
+  - name: Dashboard
+    description: Analytics and summary data
+  - name: Audit
+    description: Audit logs (Admin only)
+
+paths:
+
+  # ================================================================
+  # AUTH
+  # ================================================================
+  /auth/register:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Register a new user
+      description: Role is always forced to `viewer` for public registrations. Only an authenticated admin can create analyst/admin accounts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  example: Jane Doe
+                email:
+                  type: string
+                  example: jane@example.com
+                password:
+                  type: string
+                  example: "Secret@123"
+                  description: Min 8 chars, at least one uppercase and one number
+                role:
+                  type: string
+                  enum: [viewer, analyst, admin]
+                  description: Ignored unless the caller is an authenticated admin
+      responses:
+        '201': { description: User created successfully }
+        '409': { description: Email already exists }
+        '422': { description: Validation error }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Login — get access + refresh tokens
+      description: Use the returned `accessToken` in the Authorize button above (format — Bearer your_token_here)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  example: admin@example.com
+                password:
+                  type: string
+                  example: Admin@1234
+      responses:
+        '200':
+          description: Login successful — copy accessToken and paste in Authorize above
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties:
+                      accessToken: { type: string }
+                      refreshToken: { type: string }
+                      user:
+                        type: object
+                        properties:
+                          id: { type: string }
+                          name: { type: string }
+                          email: { type: string }
+                          role: { type: string }
+        '401': { description: Invalid credentials }
+        '403': { description: Account inactive }
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Rotate tokens using a valid refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200': { description: New access and refresh tokens issued }
+        '401': { description: Invalid or expired refresh token }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      responses:
+        '200': { description: Current authenticated user }
+        '401': { description: Not authenticated }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Logout — revoke current refresh token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refreshToken: { type: string }
+      responses:
+        '200': { description: Logged out successfully }
+
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Logout all sessions — revoke all refresh tokens
+      responses:
+        '200': { description: All sessions terminated }
+
+  # ================================================================
+  # USERS
+  # ================================================================
+  /users:
+    get:
+      tags: [Users]
+      summary: List all users — Admin only
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+        - { name: role, in: query, schema: { type: string, enum: [viewer, analyst, admin] } }
+        - { name: status, in: query, schema: { type: string, enum: [active, inactive] } }
+        - { name: search, in: query, schema: { type: string }, description: Search by name or email }
+      responses:
+        '200': { description: Paginated user list }
+        '403': { description: Admin only }
+
+  /users/{id}:
+    get:
+      tags: [Users]
+      summary: Get user by ID — self or admin
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: User object }
+        '403': { description: Cannot access other users }
+        '404': { description: User not found }
+    patch:
+      tags: [Users]
+      summary: Update user — self (name/password) or admin (role/status)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, example: New Name }
+                password: { type: string, example: "NewPass@123" }
+                role: { type: string, enum: [viewer, analyst, admin] }
+                status: { type: string, enum: [active, inactive] }
+      responses:
+        '200': { description: Updated user }
+        '403': { description: Insufficient permissions }
+        '404': { description: User not found }
+    delete:
+      tags: [Users]
+      summary: Delete user — Admin only, cannot delete self
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: User deleted }
+        '400': { description: Cannot delete your own account }
+        '403': { description: Admin only }
+        '404': { description: User not found }
+
+  # ================================================================
+  # RECORDS
+  # ================================================================
+  /records:
+    get:
+      tags: [Records]
+      summary: List financial records — all roles
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: type, in: query, schema: { type: string, enum: [income, expense] } }
+        - { name: category, in: query, schema: { type: string, example: food } }
+        - { name: startDate, in: query, schema: { type: string, format: date, example: "2024-01-01" } }
+        - { name: endDate, in: query, schema: { type: string, format: date, example: "2024-12-31" } }
+        - { name: minAmount, in: query, schema: { type: number, example: 100 } }
+        - { name: maxAmount, in: query, schema: { type: number, example: 10000 } }
+        - { name: search, in: query, schema: { type: string }, description: Search description and category }
+        - { name: sortBy, in: query, schema: { type: string, enum: [date, amount, category, created_at], default: date } }
+        - { name: order, in: query, schema: { type: string, enum: [asc, desc], default: desc } }
+      responses:
+        '200': { description: Paginated records with meta }
+        '401': { description: Not authenticated }
+        '422': { description: Invalid query params }
+
+    post:
+      tags: [Records]
+      summary: Create a financial record — Analyst or Admin only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, type, category, date]
+              properties:
+                amount: { type: number, example: 4500.00 }
+                type: { type: string, enum: [income, expense], example: expense }
+                category: { type: string, example: food }
+                date: { type: string, format: date, example: "2024-06-15" }
+                description: { type: string, example: Team lunch }
+                tags:
+                  type: array
+                  items: { type: string }
+                  example: ["work", "food"]
+      responses:
+        '201': { description: Record created }
+        '403': { description: Viewer cannot create records }
+        '422': { description: Validation error }
+
+  /records/{id}:
+    get:
+      tags: [Records]
+      summary: Get a single record by ID — all roles
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Record object }
+        '404': { description: Record not found }
+
+    patch:
+      tags: [Records]
+      summary: Update a record — Analyst or Admin only
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amount: { type: number, example: 9999 }
+                type: { type: string, enum: [income, expense] }
+                category: { type: string }
+                date: { type: string, format: date }
+                description: { type: string }
+                tags: { type: array, items: { type: string } }
+      responses:
+        '200': { description: Updated record }
+        '403': { description: Viewer cannot update }
+        '404': { description: Record not found }
+
+    delete:
+      tags: [Records]
+      summary: Soft-delete a record — Admin only
+      description: Sets is_deleted=1. Data is preserved. Use the restore endpoint to undo.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Record soft-deleted }
+        '403': { description: Admin only }
+        '404': { description: Record not found }
+
+  /records/{id}/restore:
+    post:
+      tags: [Records]
+      summary: Restore a soft-deleted record — Admin only
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: Record restored }
+        '403': { description: Admin only }
+        '404': { description: Deleted record not found }
+
+  # ================================================================
+  # DASHBOARD
+  # ================================================================
+  /dashboard/overview:
+    get:
+      tags: [Dashboard]
+      summary: Full dashboard in one call — all roles
+      description: Returns summary + category breakdown + monthly trends + top categories + recent activity + daily averages
+      parameters:
+        - { name: startDate, in: query, schema: { type: string, format: date } }
+        - { name: endDate, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: Complete dashboard data }
+
+  /dashboard/summary:
+    get:
+      tags: [Dashboard]
+      summary: Financial totals and net balance — all roles
+      parameters:
+        - { name: startDate, in: query, schema: { type: string, format: date } }
+        - { name: endDate, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: totalIncome, totalExpenses, netBalance, counts }
+
+  /dashboard/recent-activity:
+    get:
+      tags: [Dashboard]
+      summary: Latest N transactions — all roles
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 10, maximum: 50 } }
+      responses:
+        '200': { description: Recent records list }
+
+  /dashboard/categories:
+    get:
+      tags: [Dashboard]
+      summary: Category breakdown — Analyst and Admin only
+      parameters:
+        - { name: startDate, in: query, schema: { type: string, format: date } }
+        - { name: endDate, in: query, schema: { type: string, format: date } }
+        - { name: type, in: query, schema: { type: string, enum: [income, expense] } }
+      responses:
+        '200': { description: Income and expense totals per category }
+        '403': { description: Viewer cannot access analytics }
+
+  /dashboard/trends/monthly:
+    get:
+      tags: [Dashboard]
+      summary: Monthly income vs expense trends — Analyst and Admin only
+      parameters:
+        - { name: months, in: query, schema: { type: integer, default: 12 } }
+      responses:
+        '200': { description: Per-month income, expense, net balance }
+        '403': { description: Viewer cannot access analytics }
+
+  /dashboard/trends/weekly:
+    get:
+      tags: [Dashboard]
+      summary: Weekly income vs expense trends — Analyst and Admin only
+      parameters:
+        - { name: weeks, in: query, schema: { type: integer, default: 8 } }
+      responses:
+        '200': { description: Per-week income, expense, net balance }
+        '403': { description: Viewer cannot access analytics }
+
+  /dashboard/top-categories:
+    get:
+      tags: [Dashboard]
+      summary: Top spending categories — Analyst and Admin only
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 5, maximum: 20 } }
+        - { name: startDate, in: query, schema: { type: string, format: date } }
+        - { name: endDate, in: query, schema: { type: string, format: date } }
+      responses:
+        '200': { description: Top N expense categories by total }
+        '403': { description: Viewer cannot access analytics }
+
+  # ================================================================
+  # AUDIT
+  # ================================================================
+  /audit:
+    get:
+      tags: [Audit]
+      summary: Get audit logs — Admin only
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+        - { name: userId, in: query, schema: { type: string } }
+        - { name: resource, in: query, schema: { type: string, example: financial_records } }
+        - { name: action, in: query, schema: { type: string, example: CREATE_RECORD } }
+      responses:
+        '200': { description: Paginated audit logs with user info }
+        '403': { description: Admin only }
